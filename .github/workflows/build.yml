@@ -34,6 +34,9 @@ jobs:
 
   test:
     needs: build
+    permissions:
+      contents: write
+      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
@@ -52,7 +55,7 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Run unit tests
+      - name: Run unit tests with coverage
         run: npm run test:ci
 
       - name: Upload test results
@@ -62,3 +65,42 @@ jobs:
           name: test-results-${{ matrix.os }}
           path: test-results/junit.xml
           if-no-files-found: error
+
+      - name: Report code coverage
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
+        uses: davelosert/vitest-coverage-report-action@v2
+
+      - name: Upload coverage report
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          if-no-files-found: error
+
+      - name: Publish coverage badge data
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.os == 'ubuntu-latest' }}
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const summary = JSON.parse(fs.readFileSync("coverage/coverage-summary.json", "utf8"));
+            const pct = Math.round(summary.total.lines.pct);
+            const color = pct >= 80 ? "brightgreen" : pct >= 60 ? "yellow" : "red";
+            fs.writeFileSync("/tmp/coverage-badge.json", JSON.stringify({
+              schemaVersion: 1,
+              label: "coverage",
+              message: `${pct}%`,
+              color
+            }));
+          '
+          mkdir -p /tmp/badges-branch
+          cd /tmp/badges-branch
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cp /tmp/coverage-badge.json coverage-badge.json
+          git add coverage-badge.json
+          git commit -m "Update coverage badge"
+          git branch -M badges
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git push --force origin badges
