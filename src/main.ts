@@ -1,22 +1,20 @@
 import './style.css';
+import {
+  COLUMNS,
+  ROWS,
+  SHAPES,
+  calculateDropInterval,
+  calculateScoreReward,
+  clearCompletedRows,
+  createBoard,
+  createPiece,
+  hasCollision,
+  rotate,
+  type Piece,
+  type PieceType,
+} from './gameLogic';
 
-const COLUMNS = 10;
-const ROWS = 20;
 const CELL = 30;
-
-type PieceType = 'I' | 'O' | 'T' | 'S' | 'Z' | 'J' | 'L';
-type Matrix = number[][];
-type Piece = { type: PieceType; matrix: Matrix; x: number; y: number };
-
-const SHAPES: Record<PieceType, Matrix> = {
-  I: [[1, 1, 1, 1]],
-  O: [[1, 1], [1, 1]],
-  T: [[0, 1, 0], [1, 1, 1]],
-  S: [[0, 1, 1], [1, 1, 0]],
-  Z: [[1, 1, 0], [0, 1, 1]],
-  J: [[1, 0, 0], [1, 1, 1]],
-  L: [[0, 0, 1], [1, 1, 1]],
-};
 
 const COLORS: Record<PieceType, [string, string]> = {
   I: ['#39d8ef', '#1199c4'], O: ['#ffd166', '#e89a35'], T: ['#b78aff', '#8053d6'],
@@ -68,10 +66,6 @@ let gameOver = false;
 let lastDrop = 0;
 let animationFrame = 0;
 
-function createBoard(): (PieceType | null)[][] {
-  return Array.from({ length: ROWS }, () => Array<PieceType | null>(COLUMNS).fill(null));
-}
-
 function refillBag(): void {
   const types = Object.keys(SHAPES) as PieceType[];
   for (let i = types.length - 1; i > 0; i--) {
@@ -86,18 +80,8 @@ function drawFromBag(): PieceType {
   return bag.pop()!;
 }
 
-function createPiece(type: PieceType): Piece {
-  const matrix = SHAPES[type].map((row) => [...row]);
-  return { type, matrix, x: Math.floor((COLUMNS - matrix[0].length) / 2), y: 0 };
-}
-
 function collision(piece: Piece, dx = 0, dy = 0, matrix = piece.matrix): boolean {
-  return matrix.some((row, rowIndex) => row.some((value, columnIndex) => {
-    if (!value) return false;
-    const x = piece.x + columnIndex + dx;
-    const y = piece.y + rowIndex + dy;
-    return x < 0 || x >= COLUMNS || y >= ROWS || (y >= 0 && board[y][x] !== null);
-  }));
+  return hasCollision(board, piece, dx, dy, matrix);
 }
 
 function fillUpcoming(): void {
@@ -111,10 +95,6 @@ function spawnNext(): void {
   canHold = true;
   holdStatus.textContent = 'SAVE FOR LATER';
   if (collision(active)) finishGame();
-}
-
-function rotate(matrix: Matrix): Matrix {
-  return matrix[0].map((_, column) => matrix.map((row) => row[column]).reverse());
 }
 
 function rotateActive(): void {
@@ -173,19 +153,11 @@ function lockPiece(): void {
     }
   }
 
-  let cleared = 0;
-  board = board.filter((row) => {
-    if (row.every((cell) => cell !== null)) {
-      cleared += 1;
-      return false;
-    }
-    return true;
-  });
-  while (board.length < ROWS) board.unshift(Array<PieceType | null>(COLUMNS).fill(null));
+  const { board: nextBoard, cleared } = clearCompletedRows(board);
+  board = nextBoard;
 
-  const rewards = [0, 100, 300, 500, 800];
   if (cleared > 0) {
-    score += (rewards[cleared] ?? 800) * level;
+    score += calculateScoreReward(cleared, level);
     lines += cleared;
     level = Math.floor(lines / 10) + 1;
   }
@@ -328,7 +300,7 @@ function drawPreview(ctx: CanvasRenderingContext2D, types: (PieceType | null)[],
 
 function render(time: number): void {
   if (!paused && !gameOver) {
-    const interval = Math.max(90, 800 - (level - 1) * 65);
+    const interval = calculateDropInterval(level);
     if (time - lastDrop >= interval) {
       if (!move(0, 1)) lockPiece();
       lastDrop = time;
